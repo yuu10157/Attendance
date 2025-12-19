@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>勤務収入管理アプリ</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,system-ui,"Segoe UI",sans-serif;margin:0;padding:16px;max-width:1400px;margin-inline:auto}
+h1{font-size:1.8rem;margin:0 0 12px}
+h2{font-size:1.25rem;margin:22px 0 8px}
+.card{border:1px solid #ddd;border-radius:12px;padding:16px;margin-bottom:18px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 16px;align-items:start}
+.group{display:flex;flex-direction:column}
+label{font-weight:800;margin:0 0 6px;font-size:.95rem}
+input,select{
+  width:100%;height:40px;font-size:.95rem;
+  border-radius:6px;border:1px solid #ccc;padding:6px 8px;box-sizing:border-box
+}
+input[readonly]{background:#f6f6f6}
+.time{display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:center}
+.time span{font-weight:800}
+.note{font-size:.8rem;color:#555;min-height:1.1em;margin-top:4px}
+.buttons{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap}
+button{height:40px;padding:0 14px;border-radius:6px;border:1px solid #888;background:#f3f3f3;cursor:pointer;font-size:1rem}
+button:hover{background:#e6e6e6}
+.btnSmall{height:34px;padding:0 10px;font-size:.9rem}
+table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.9rem}
+th,td{border:1px solid #ddd;padding:8px;text-align:center;white-space:nowrap}
+th{background:#f5f5f5}
+td.right{text-align:right}
+/* modal */
+.modalBack{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;padding:12px}
+.modal{background:#fff;border-radius:12px;border:1px solid #ddd;max-width:780px;width:100%;padding:16px}
+.modal h3{margin:0 0 10px;font-size:1.2rem}
+.modal .grid{grid-template-columns:repeat(2,1fr)}
+.modal .buttons{justify-content:flex-end}
+@media(max-width:980px){.grid{grid-template-columns:1fr}.modal .grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<h1>勤務収入管理アプリ</h1>
+
+<div class="card">
+  <div class="grid">
+    <div class="group">
+      <label>記入日時（自動）</label>
+      <input id="ts" readonly>
+      <div class="note">&nbsp;</div>
+    </div>
+
+    <div class="group">
+      <label>出勤場所</label>
+      <select id="place">
+        <option value="">選択</option>
+        <option value="ジャンボ総本店">ジャンボ総本店</option>
+        <option value="スイミング">スイミング</option>
+      </select>
+      <div class="note">&nbsp;</div>
+    </div>
+
+    <div class="group">
+      <label>時給（円）</label>
+      <input id="wage" type="number" inputmode="numeric">
+      <div class="note">※ スイミングは「時給1時間分」単価</div>
+    </div>
+
+    <div class="group">
+      <label>出勤日</label>
+      <input id="workDate" type="date">
+      <div class="note">実際に働いた日</div>
+    </div>
+
+    <div class="group">
+      <label>出勤時刻</label>
+      <div class="time">
+        <select id="sh"></select><span>:</span><select id="sm"></select>
+      </div>
+      <div class="note">&nbsp;</div>
+    </div>
+
+    <div class="group">
+      <label>退勤時刻</label>
+      <div class="time">
+        <select id="eh"></select><span>:</span><select id="em"></select>
+      </div>
+      <div class="note">&nbsp;</div>
+    </div>
+
+    <div class="group">
+      <label>勤務時間(h)</label>
+      <input id="hours" readonly>
+      <div class="note">&nbsp;</div>
+    </div>
+
+    <div class="group">
+      <label>収入(円)</label>
+      <input id="income" readonly>
+      <div class="note" id="incomeNote">&nbsp;</div>
+    </div>
+  </div>
+
+  <div class="buttons">
+    <button onclick="add()">行を追加</button>
+    <button onclick="clearAll()">全削除（端末）</button>
+  </div>
+</div>
+
+<div class="card">
+  <h2>支払日別（何日にいくら振り込まれる）</h2>
+  <table id="payday"></table>
+</div>
+
+<div class="card">
+  <h2>明細一覧</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th><th>出勤日</th><th>場所</th>
+        <th>出勤</th><th>退勤</th>
+        <th>勤務時間</th><th>支払対象時間</th><th>時給</th><th>収入</th><th>支払日</th><th>編集</th><th>削除</th>
+      </tr>
+    </thead>
+    <tbody id="list"></tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>月別集計（支払月ベース）</h2>
+  <table id="monthly"></table>
+</div>
+
+<div class="card">
+  <h2>年別集計（支払年ベース）</h2>
+  <table id="yearly"></table>
+</div>
+
+<!-- Edit modal -->
+<div id="modalBack" class="modalBack" role="dialog" aria-modal="true">
+  <div class="modal">
+    <h3>行を編集</h3>
+    <div class="grid">
+      <div class="group">
+        <label>出勤日</label>
+        <input id="e_date" type="date">
+        <div class="note">&nbsp;</div>
+      </div>
+      <div class="group">
+        <label>出勤場所</label>
+        <select id="e_place">
+          <option value="ジャンボ総本店">ジャンボ総本店</option>
+          <option value="スイミング">スイミング</option>
+        </select>
+        <div class="note">&nbsp;</div>
+      </div>
+      <div class="group">
+        <label>時給（円）</label>
+        <input id="e_wage" type="number" inputmode="numeric">
+        <div class="note">&nbsp;</div>
+      </div>
+      <div class="group">
+        <label>出勤時刻</label>
+        <div class="time">
+          <select id="e_sh"></select><span>:</span><select id="e_sm"></select>
+        </div>
+        <div class="note">&nbsp;</div>
+      </div>
+      <div class="group">
+        <label>退勤時刻</label>
+        <div class="time">
+          <select id="e_eh"></select><span>:</span><select id="e_em"></select>
+        </div>
+        <div class="note">&nbsp;</div>
+      </div>
+      <div class="group">
+        <label>勤務時間(h)</label>
+        <input id="e_hours" readonly>
+        <div class="note">&nbsp;</div>
+      </div>
+      <div class="group">
+        <label>収入(円)</label>
+        <input id="e_income" readonly>
+        <div class="note" id="e_incomeNote">&nbsp;</div>
+      </div>
+    </div>
+    <div class="buttons">
+      <button class="btnSmall" onclick="closeModal()">キャンセル</button>
+      <button class="btnSmall" onclick="applyEdit()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const KEY="work_records_payroll_v1";
+const pad=n=>String(n).padStart(2,"0");
+
+function nowTs(){
+  const d=new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+ts.value=nowTs(); setInterval(()=>ts.value=nowTs(),1000);
+
+function initTimePair(hId,mId){
+  const h=document.getElementById(hId), m=document.getElementById(mId);
+  h.innerHTML="<option></option>";
+  for(let i=0;i<24;i++) h.innerHTML+=`<option value="${pad(i)}">${pad(i)}</option>`;
+  m.innerHTML="<option></option>";
+  ["00","15","30","45"].forEach(v=>m.innerHTML+=`<option value="${v}">${v}</option>`);
+}
+initTimePair("sh","sm"); initTimePair("eh","em");
+initTimePair("e_sh","e_sm"); initTimePair("e_eh","e_em");
+
+workDate.value=new Date().toISOString().slice(0,10);
+
+function minutes(h,m){ return Number(h)*60 + Number(m); }
+
+/* ===== スイミングの支払対象時間 =====
+勤務時間 1.5h → 1時間分
+勤務時間 2.5h → 2時間分
+一般化：支払対象時間 = max(0, floor(勤務時間 - 0.5))
+*/
+function swimmingPayHours(h){
+  return Math.max(0, Math.floor((h - 0.5) + 1e-9));
+}
+
+function calcIncome(place, h, wage){
+  if(place==="スイミング"){
+    const payH = swimmingPayHours(h);
+    return { payHours: payH, income: payH * wage, note: `${payH}時間分（スイミング）` };
+  }
+  return { payHours: h, income: Math.round(h * wage), note: "" };
+}
+
+/* ===== 日本の祝日（アルゴリズム）===== */
+function nthMonday(year, monthIndex0, nth){
+  const first = new Date(year, monthIndex0, 1);
+  const firstDow = first.getDay(); // 0 Sun .. 6 Sat
+  const offset = (8 - firstDow) % 7; // days to first Monday
+  const day = 1 + offset + (nth-1)*7;
+  return new Date(year, monthIndex0, day);
+}
+function vernalEquinoxDay(year){
+  // Approx formula valid around 1980-2099
+  return Math.floor(20.8431 + 0.242194*(year-1980) - Math.floor((year-1980)/4));
+}
+function autumnEquinoxDay(year){
+  return Math.floor(23.2488 + 0.242194*(year-1980) - Math.floor((year-1980)/4));
+}
+function ymd(d){ return d.toISOString().slice(0,10); }
+
+function holidaysForYear(year){
+  const set = new Set();
+  const add = (m,day)=>set.add(ymd(new Date(year,m-1,day)));
+  // Fixed
+  add(1,1);   // 元日
+  add(2,11);  // 建国記念の日
+  add(2,23);  // 天皇誕生日
+  add(4,29);  // 昭和の日
+  add(5,3); add(5,4); add(5,5); // GW
+  add(8,11);  // 山の日
+  add(11,3); add(11,23); // 文化の日, 勤労感謝の日
+  // Movable Mondays
+  set.add(ymd(nthMonday(year,0,2)));  // 成人の日（1月第2月曜）
+  set.add(ymd(nthMonday(year,6,3)));  // 海の日（7月第3月曜）
+  set.add(ymd(nthMonday(year,8,3)));  // 敬老の日（9月第3月曜）
+  set.add(ymd(nthMonday(year,9,2)));  // スポーツの日（10月第2月曜）
+  // Equinox
+  add(3, vernalEquinoxDay(year));
+  add(9, autumnEquinoxDay(year));
+
+  // 振替休日: 祝日が日曜なら次の平日を振替（連鎖）
+  const base = Array.from(set).sort();
+  base.forEach(s=>{
+    const d = new Date(s);
+    if(d.getDay()===0){ // Sunday
+      let t = new Date(d);
+      do { t.setDate(t.getDate()+1); } while(set.has(ymd(t)));
+      set.add(ymd(t));
+    }
+  });
+
+  // 国民の休日: 祝日に挟まれた平日
+  // 走査して追加
+  for(let m=0;m<12;m++){
+    for(let day=1; day<=31; day++){
+      const d = new Date(year,m,day);
+      if(d.getMonth()!==m) break;
+      const s = ymd(d);
+      if(set.has(s)) continue;
+      const prev = new Date(d); prev.setDate(prev.getDate()-1);
+      const next = new Date(d); next.setDate(next.getDate()+1);
+      if(set.has(ymd(prev)) && set.has(ymd(next)) && d.getDay()!==0){
+        set.add(s);
+      }
+    }
+  }
+  return set;
+}
+const holidayCache = {};
+function isJapanHoliday(d){
+  const y=d.getFullYear();
+  holidayCache[y] = holidayCache[y] || holidaysForYear(y);
+  return holidayCache[y].has(ymd(d));
+}
+
+/* 支払日が土日祝なら前倒し（前営業日） */
+function adjustPayDate(d){
+  while(d.getDay()===0 || d.getDay()===6 || isJapanHoliday(d)){
+    d.setDate(d.getDate()-1);
+  }
+  return d;
+}
+
+/* ===== 支払日計算（ユーザー指定）=====
+ジャンボ：毎月15日締め → 月末支払い
+  - 1〜15日分 → 当月末支払い
+  - 16〜月末分 → 翌月末支払い
+スイミング：月末締め → 翌月20日払い
+*/
+function calcPayDate(place, workDateStr){
+  const wd = new Date(workDateStr);
+  const y = wd.getFullYear(), m = wd.getMonth(); // 0-based
+  let pay;
+  if(place==="ジャンボ総本店"){
+    if(wd.getDate()<=15){
+      // 当月末
+      pay = new Date(y, m+1, 0);
+    }else{
+      // 翌月末
+      pay = new Date(y, m+2, 0);
+    }
+  }else{
+    // 翌月20日
+    pay = new Date(y, m+1, 20);
+  }
+  return ymd(adjustPayDate(pay));
+}
+
+/* ===== 入力プレビュー ===== */
+function calcPreview(){
+  if(!sh.value||!sm.value||!eh.value||!em.value){
+    hours.value=""; income.value=""; incomeNote.innerHTML="&nbsp;"; return;
+  }
+  let s=minutes(sh.value,sm.value);
+  let e=minutes(eh.value,em.value);
+  let diff=e-s; if(diff<=0) diff+=1440;
+  const h=diff/60;
+  hours.value=h.toFixed(2);
+
+  if(!wage.value || !place.value){ income.value=""; incomeNote.innerHTML="&nbsp;"; return; }
+  const r=calcIncome(place.value, h, Number(wage.value));
+  income.value=String(r.income);
+  incomeNote.textContent = r.note || " ";
+}
+["sh","sm","eh","em","wage","place"].forEach(id=>document.getElementById(id).addEventListener("change",calcPreview));
+
+/* ===== CRUD ===== */
+let recs = JSON.parse(localStorage.getItem(KEY)||"[]");
+
+function add(){
+  if(!place.value||!wage.value||!hours.value) return alert("未入力があります");
+  if(!workDate.value) return alert("出勤日を入れてください");
+  const h=Number(hours.value);
+  const wageNum=Number(wage.value);
+  const r=calcIncome(place.value, h, wageNum);
+  recs.push({
+    date: workDate.value,
+    place: place.value,
+    start: `${sh.value}:${sm.value}`,
+    end: `${eh.value}:${em.value}`,
+    hours: h,
+    payHours: r.payHours,
+    wage: wageNum,
+    income: r.income,
+    pay: calcPayDate(place.value, workDate.value)
+  });
+  save();
+}
+
+function delRow(i){
+  if(confirm("削除しますか？")){
+    recs.splice(i,1);
+    save();
+  }
+}
+function clearAll(){
+  if(confirm("全削除しますか？")){
+    recs=[];
+    save();
+  }
+}
+function save(){
+  localStorage.setItem(KEY, JSON.stringify(recs));
+  render();
+}
+
+/* ===== Edit Modal ===== */
+let editIndex = null;
+function openModal(i){
+  editIndex = i;
+  const r = recs[i];
+  e_date.value = r.date;
+  e_place.value = r.place;
+  e_wage.value = r.wage;
+
+  const [shh,smm] = r.start.split(":");
+  const [ehh,emm] = r.end.split(":");
+  e_sh.value = shh; e_sm.value = smm;
+  e_eh.value = ehh; e_em.value = emm;
+
+  recomputeEditPreview();
+  modalBack.style.display="flex";
+}
+function closeModal(){
+  modalBack.style.display="none";
+  editIndex = null;
+}
+modalBack.addEventListener("click", (ev)=>{
+  if(ev.target===modalBack) closeModal();
+});
+
+function recomputeEditPreview(){
+  if(!e_sh.value||!e_sm.value||!e_eh.value||!e_em.value){
+    e_hours.value=""; e_income.value=""; e_incomeNote.textContent=""; return;
+  }
+  let s=minutes(e_sh.value,e_sm.value);
+  let e=minutes(e_eh.value,e_em.value);
+  let diff=e-s; if(diff<=0) diff+=1440;
+  const h=diff/60;
+  e_hours.value=h.toFixed(2);
+
+  const wageNum=Number(e_wage.value||0);
+  const r=calcIncome(e_place.value, h, wageNum);
+  e_income.value=String(r.income);
+  e_incomeNote.textContent=r.note||"";
+}
+["e_sh","e_sm","e_eh","e_em","e_place"].forEach(id=>document.getElementById(id).addEventListener("change",recomputeEditPreview));
+e_wage.addEventListener("change",recomputeEditPreview);
+e_wage.addEventListener("input",recomputeEditPreview);
+
+function applyEdit(){
+  if(editIndex===null) return;
+  if(!e_date.value||!e_place.value||!e_wage.value||!e_sh.value||!e_sm.value||!e_eh.value||!e_em.value) return alert("未入力があります");
+  const start = `${e_sh.value}:${e_sm.value}`;
+  const end   = `${e_eh.value}:${e_em.value}`;
+  const h = Number(e_hours.value);
+  const wageNum = Number(e_wage.value);
+  const r=calcIncome(e_place.value, h, wageNum);
+
+  recs[editIndex] = {
+    date: e_date.value,
+    place: e_place.value,
+    start,
+    end,
+    hours: h,
+    payHours: r.payHours,
+    wage: wageNum,
+    income: r.income,
+    pay: calcPayDate(e_place.value, e_date.value)
+  };
+  save();
+  closeModal();
+}
+
+/* ===== Render ===== */
+function render(){
+  // 明細
+  list.innerHTML="";
+  recs.forEach((r,i)=>{
+    list.insertAdjacentHTML("beforeend", `
+      <tr>
+        <td>${i+1}</td>
+        <td>${r.date}</td>
+        <td>${r.place}</td>
+        <td>${r.start}</td>
+        <td>${r.end}</td>
+        <td>${Number(r.hours).toFixed(2)}</td>
+        <td>${(r.place==="スイミング") ? (r.payHours + "h") : (Number(r.payHours).toFixed(2)+"h")}</td>
+        <td>${Number(r.wage).toLocaleString()}</td>
+        <td class="right">¥${Number(r.income).toLocaleString()}</td>
+        <td>${r.pay}</td>
+        <td><button class="btnSmall" onclick="openModal(${i})">編集</button></td>
+        <td><button class="btnSmall" onclick="delRow(${i})">削除</button></td>
+      </tr>
+    `);
+  });
+
+  renderPayday();
+  renderMonthlyYearlyByPayMonth();
+}
+
+function addAgg(obj, k){
+  if(!obj[k]) obj[k]={j:0,s:0,t:0,jh:0,sh:0,th:0};
+  return obj[k];
+}
+
+function renderPayday(){
+  // pay day table: YYYY-MM-DD
+  const a = {};
+  recs.forEach(r=>{
+    const row = addAgg(a, r.pay);
+    if(r.place==="ジャンボ総本店"){ row.j+=r.income; row.jh+=r.hours; }
+    else{ row.s+=r.income; row.sh+=r.hours; }
+    row.t = row.j + row.s;
+    row.th = row.jh + row.sh;
+  });
+
+  const keys = Object.keys(a).sort();
+  payday.innerHTML = `<tr>
+    <th>支払日</th><th>ジャンボ振込</th><th>ジャンボ時間</th>
+    <th>スイミング振込</th><th>スイミング時間</th>
+    <th>合算</th><th>合算時間</th>
+  </tr>`;
+  keys.forEach(k=>{
+    const r=a[k];
+    payday.insertAdjacentHTML("beforeend", `
+      <tr>
+        <td>${k}</td>
+        <td class="right">¥${r.j.toLocaleString()}</td><td class="right">${r.jh.toFixed(1)}h</td>
+        <td class="right">¥${r.s.toLocaleString()}</td><td class="right">${r.sh.toFixed(1)}h</td>
+        <td class="right">¥${r.t.toLocaleString()}</td><td class="right">${r.th.toFixed(1)}h</td>
+      </tr>
+    `);
+  });
+  if(keys.length===0){
+    payday.insertAdjacentHTML("beforeend", `<tr><td colspan="7">データなし</td></tr>`);
+  }
+}
+
+function renderMonthlyYearlyByPayMonth(){
+  const m = {}, y = {};
+  recs.forEach(r=>{
+    const payMonth = r.pay.slice(0,7);
+    const payYear  = r.pay.slice(0,4);
+    const rm = addAgg(m, payMonth);
+    const ry = addAgg(y, payYear);
+    if(r.place==="ジャンボ総本店"){ rm.j+=r.income; rm.jh+=r.hours; ry.j+=r.income; ry.jh+=r.hours; }
+    else{ rm.s+=r.income; rm.sh+=r.hours; ry.s+=r.income; ry.sh+=r.hours; }
+    rm.t = rm.j + rm.s; rm.th = rm.jh + rm.sh;
+    ry.t = ry.j + ry.s; ry.th = ry.jh + ry.sh;
+  });
+
+  monthly.innerHTML = `<tr>
+    <th>支払月</th>
+    <th>ジャンボ収入</th><th>ジャンボ時間</th>
+    <th>スイミング収入</th><th>スイミング時間</th>
+    <th>合算収入</th><th>合算時間</th>
+  </tr>`;
+  Object.keys(m).sort().forEach(k=>{
+    const r=m[k];
+    monthly.insertAdjacentHTML("beforeend", `
+      <tr>
+        <td>${k}</td>
+        <td class="right">¥${r.j.toLocaleString()}</td><td class="right">${r.jh.toFixed(1)}h</td>
+        <td class="right">¥${r.s.toLocaleString()}</td><td class="right">${r.sh.toFixed(1)}h</td>
+        <td class="right">¥${r.t.toLocaleString()}</td><td class="right">${r.th.toFixed(1)}h</td>
+      </tr>
+    `);
+  });
+  if(Object.keys(m).length===0){
+    monthly.insertAdjacentHTML("beforeend", `<tr><td colspan="7">データなし</td></tr>`);
+  }
+
+  yearly.innerHTML = `<tr>
+    <th>支払年</th>
+    <th>ジャンボ収入</th><th>ジャンボ時間</th>
+    <th>スイミング収入</th><th>スイミング時間</th>
+    <th>合算収入</th><th>合算時間</th>
+  </tr>`;
+  Object.keys(y).sort().forEach(k=>{
+    const r=y[k];
+    yearly.insertAdjacentHTML("beforeend", `
+      <tr>
+        <td>${k}</td>
+        <td class="right">¥${r.j.toLocaleString()}</td><td class="right">${r.jh.toFixed(1)}h</td>
+        <td class="right">¥${r.s.toLocaleString()}</td><td class="right">${r.sh.toFixed(1)}h</td>
+        <td class="right">¥${r.t.toLocaleString()}</td><td class="right">${r.th.toFixed(1)}h</td>
+      </tr>
+    `);
+  });
+  if(Object.keys(y).length===0){
+    yearly.insertAdjacentHTML("beforeend", `<tr><td colspan="7">データなし</td></tr>`);
+  }
+}
+
+// 初期表示
+render();
+</script>
+
+</body>
+</html>
