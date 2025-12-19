@@ -214,11 +214,6 @@ workDate.value=new Date().toISOString().slice(0,10);
 
 function minutes(h,m){ return Number(h)*60 + Number(m); }
 
-/* ===== スイミングの支払対象時間 =====
-勤務時間 1.5h → 1時間分
-勤務時間 2.5h → 2時間分
-一般化：支払対象時間 = max(0, floor(勤務時間 - 0.5))
-*/
 function swimmingPayHours(h){
   return Math.max(0, Math.floor((h - 0.5) + 1e-9));
 }
@@ -231,112 +226,36 @@ function calcIncome(place, h, wage){
   return { payHours: h, income: Math.round(h * wage), note: "" };
 }
 
-/* ===== 日本の祝日（アルゴリズム）===== */
-function nthMonday(year, monthIndex0, nth){
-  const first = new Date(year, monthIndex0, 1);
-  const firstDow = first.getDay(); // 0 Sun .. 6 Sat
-  const offset = (8 - firstDow) % 7; // days to first Monday
-  const day = 1 + offset + (nth-1)*7;
-  return new Date(year, monthIndex0, day);
-}
-function vernalEquinoxDay(year){
-  // Approx formula valid around 1980-2099
-  return Math.floor(20.8431 + 0.242194*(year-1980) - Math.floor((year-1980)/4));
-}
-function autumnEquinoxDay(year){
-  return Math.floor(23.2488 + 0.242194*(year-1980) - Math.floor((year-1980)/4));
-}
-function ymd(d){ return d.toISOString().slice(0,10); }
-
-function holidaysForYear(year){
-  const set = new Set();
-  const add = (m,day)=>set.add(ymd(new Date(year,m-1,day)));
-  // Fixed
-  add(1,1);   // 元日
-  add(2,11);  // 建国記念の日
-  add(2,23);  // 天皇誕生日
-  add(4,29);  // 昭和の日
-  add(5,3); add(5,4); add(5,5); // GW
-  add(8,11);  // 山の日
-  add(11,3); add(11,23); // 文化の日, 勤労感謝の日
-  // Movable Mondays
-  set.add(ymd(nthMonday(year,0,2)));  // 成人の日（1月第2月曜）
-  set.add(ymd(nthMonday(year,6,3)));  // 海の日（7月第3月曜）
-  set.add(ymd(nthMonday(year,8,3)));  // 敬老の日（9月第3月曜）
-  set.add(ymd(nthMonday(year,9,2)));  // スポーツの日（10月第2月曜）
-  // Equinox
-  add(3, vernalEquinoxDay(year));
-  add(9, autumnEquinoxDay(year));
-
-  // 振替休日: 祝日が日曜なら次の平日を振替（連鎖）
-  const base = Array.from(set).sort();
-  base.forEach(s=>{
-    const d = new Date(s);
-    if(d.getDay()===0){ // Sunday
-      let t = new Date(d);
-      do { t.setDate(t.getDate()+1); } while(set.has(ymd(t)));
-      set.add(ymd(t));
-    }
-  });
-
-  // 国民の休日: 祝日に挟まれた平日
-  // 走査して追加
-  for(let m=0;m<12;m++){
-    for(let day=1; day<=31; day++){
-      const d = new Date(year,m,day);
-      if(d.getMonth()!==m) break;
-      const s = ymd(d);
-      if(set.has(s)) continue;
-      const prev = new Date(d); prev.setDate(prev.getDate()-1);
-      const next = new Date(d); next.setDate(next.getDate()+1);
-      if(set.has(ymd(prev)) && set.has(ymd(next)) && d.getDay()!==0){
-        set.add(s);
-      }
-    }
-  }
-  return set;
-}
-const holidayCache = {};
-function isJapanHoliday(d){
-  const y=d.getFullYear();
-  holidayCache[y] = holidayCache[y] || holidaysForYear(y);
-  return holidayCache[y].has(ymd(d));
-}
-
-/* 支払日が土日祝なら前倒し（前営業日） */
-function adjustPayDate(d){
-  while(d.getDay()===0 || d.getDay()===6 || isJapanHoliday(d)){
-    d.setDate(d.getDate()-1);
+/* ===== 支払日計算（★修正点）=====
+ジャンボ：月末支払いは「必ず直前の金曜日」
+（曜日・祝日判定は一切しない）
+スイミング：翌月20日（変更なし）
+*/
+function adjustToPreviousFriday(d){
+  while(d.getDay() !== 5){
+    d.setDate(d.getDate() - 1);
   }
   return d;
 }
 
-/* ===== 支払日計算（ユーザー指定）=====
-ジャンボ：毎月15日締め → 月末支払い
-  - 1〜15日分 → 当月末支払い
-  - 16〜月末分 → 翌月末支払い
-スイミング：月末締め → 翌月20日払い
-*/
 function calcPayDate(place, workDateStr){
   const wd = new Date(workDateStr);
-  const y = wd.getFullYear(), m = wd.getMonth(); // 0-based
+  const y = wd.getFullYear(), m = wd.getMonth();
   let pay;
+
   if(place==="ジャンボ総本店"){
     if(wd.getDate()<=15){
-      // 当月末
-      pay = new Date(y, m+1, 0);
+      pay = new Date(y, m+1, 0);   // 当月末
     }else{
-      // 翌月末
-      pay = new Date(y, m+2, 0);
+      pay = new Date(y, m+2, 0);   // 翌月末
     }
+    return adjustToPreviousFriday(pay).toISOString().slice(0,10);
   }else{
-    // 翌月20日
-    pay = new Date(y, m+1, 20);
+    return new Date(y, m+1, 20).toISOString().slice(0,10);
   }
-  return ymd(adjustPayDate(pay));
 }
 
-/* ===== 入力プレビュー ===== */
+/* ===== 以降は元コードそのまま ===== */
 function calcPreview(){
   if(!sh.value||!sm.value||!eh.value||!em.value){
     hours.value=""; income.value=""; incomeNote.innerHTML="&nbsp;"; return;
@@ -354,7 +273,6 @@ function calcPreview(){
 }
 ["sh","sm","eh","em","wage","place"].forEach(id=>document.getElementById(id).addEventListener("change",calcPreview));
 
-/* ===== CRUD ===== */
 let recs = JSON.parse(localStorage.getItem(KEY)||"[]");
 
 function add(){
@@ -394,7 +312,6 @@ function save(){
   render();
 }
 
-/* ===== Edit Modal ===== */
 let editIndex = null;
 function openModal(i){
   editIndex = i;
@@ -462,9 +379,12 @@ function applyEdit(){
   closeModal();
 }
 
-/* ===== Render ===== */
+function addAgg(obj, k){
+  if(!obj[k]) obj[k]={j:0,s:0,t:0,jh:0,sh:0,th:0};
+  return obj[k];
+}
+
 function render(){
-  // 明細
   list.innerHTML="";
   recs.forEach((r,i)=>{
     list.insertAdjacentHTML("beforeend", `
@@ -484,18 +404,11 @@ function render(){
       </tr>
     `);
   });
-
   renderPayday();
   renderMonthlyYearlyByPayMonth();
 }
 
-function addAgg(obj, k){
-  if(!obj[k]) obj[k]={j:0,s:0,t:0,jh:0,sh:0,th:0};
-  return obj[k];
-}
-
 function renderPayday(){
-  // pay day table: YYYY-MM-DD
   const a = {};
   recs.forEach(r=>{
     const row = addAgg(a, r.pay);
@@ -583,9 +496,7 @@ function renderMonthlyYearlyByPayMonth(){
   }
 }
 
-// 初期表示
 render();
 </script>
-
 </body>
 </html>
